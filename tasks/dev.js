@@ -144,6 +144,7 @@ module.exports = function(grunt) {
     routes = routes || ['.*\/index.html'];
     
     var injector = function(req, res, next){
+      //return next();
       var url = req.url;
       var isMatch = false;
       for(var i in routes){
@@ -152,30 +153,39 @@ module.exports = function(grunt) {
         if(isMatch) break;
       }
 
-      if(!isMatch) return next();
+      if(!isMatch){
+        return next();
+      }
+
+      console.log('Injecting clientReload Script into', req.url);
 
       var port = res.socket.server.address().port;
 
-      var _write = res.write;
+      var _write = res.socket.write;
       var _end = res.end;
       var _writeHead = res.writeHead;
+      var _setHeader = res.setHeader;
 
       var responseBuffer = new buffers();
       var html = '';
       var responseEncoding = 'utf8';
-      var _headers;
+      var headersBuffer;
       var _statusCode;
-      //console.log(Object.keys(res).sort());
-      res.writeHead = function(statusCode, headers){
-        _writeHead.call(res, statusCode, headers);
-      };
 
-      res.write = function(data){
-        responseBuffer.push(data);
+      res.socket.write = function(chunk, encoding){
+        var chunkBuffer = chunk;
+        if(chunkBuffer && typeof chunkBuffer === 'string'){
+          chunkBuffer = new Buffer(chunkBuffer, encoding);
+        }
+        responseBuffer.push(chunkBuffer);
       };
-
-      res.end = function(){
-        html = responseBuffer.toString().replace(/<\/body>/, function(w) {
+      
+      res.end = function(chunk, encoding){
+        if(chunk){
+          res.write(chunk, encoding);
+        }
+        originalResponse = responseBuffer.toString();
+        var response = originalResponse.replace(/<\/body>/, function(w) {
           return [
             "<!-- reload snippet -->\n",
             "<script>\n",
@@ -189,8 +199,15 @@ module.exports = function(grunt) {
             w
           ].join('');
         });
-        res.setHeader('content-length', html.length);
-        _write.call(res, html);
+        response = response.replace(/Content-Length:\s*\d+/i, function(w){
+          //'Content-Length: '+ response.length
+          var length = parseInt(w.split(':')[1], 10);
+          length += response.length - originalResponse.length;
+          return 'Content-Length: ' + length;
+        });
+        
+        res.socket.write = _write;
+        res.socket.write(response);
         _end.call(res);
       };
       return next();
