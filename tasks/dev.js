@@ -7,21 +7,8 @@
  */
 
 module.exports = function(grunt) {
-  var fs = require('fs');
-  var path = require('path');
-  var buffers = require('buffers');
-  // In Nodejs 0.8.0, existsSync moved from path -> fs.
-  var existsSync = fs.existsSync || path.existsSync;
-
-  var http = require('http');
-  var taskEvent = new require('events').EventEmitter();
-
-  var connect = require('connect');
-  var WebSocketServer = require('websocket').server;
-
-  var httpServer = null;
-  var wsio = null;
-
+  var fork = require('child_process').fork;
+  var serverProcess = null;
   // Please see the grunt documentation for more information regarding task and
   // helper creation: https://github.com/gruntjs/grunt/blob/master/docs/toc.md
 
@@ -36,217 +23,54 @@ module.exports = function(grunt) {
 
     var taskDone = self.async();
 
-    grunt.task.run('dev:server-restart');
+    grunt.task.run('dev:server-start');
 
     //enqueue watch task
     grunt.task.run('watch');
     taskDone();
   });
 
-  grunt.registerTask('dev:server-restart', 'Start the dev server', function(){
+  grunt.registerTask('dev:server-start', 'Start the dev server', function(){
     var self = this;
-    self.requiresConfig('dev');
-    var options = grunt.config.get('dev');
-    var port = options.server.port;
+    self.requiresConfig('dev.server', 'dev.server.port');
     
-    var taskDone = self.async();
-    // Start server.
-    if(!httpServer){
-      httpServer = http.createServer();
-      httpServer.listen(port, function(){
-        grunt.log.write( 'Starting dev server on port '.yellow + String( port ).red );
-        
-        //.writeln( '  - ' + path.resolve(opts.base) )
-        //.writeln('I\'ll also watch your files for changes, recompile if neccessary and live reload the page.')
-        grunt.log.writeln('...'.yellow + 'Done'.green).writeln('Hit Ctrl+C to quit.');
-        
+    var taskDone = this.async();
+
+    var options = grunt.config.get('dev.server');
+
+    grunt.log.write( 'Starting dev server on port '.yellow + String( options.port ).blue + '...' );
+    serverProcess = fork(__dirname + '/lib/dev-server.js', [], {
+      cwd: process.cwd(),
+      env: process.env
+    });
+
+    serverProcess.on('message', function(m){
+      if(m === 'server-started'){
+        grunt.log.writeln('Done'.green);
+      }
+      else if(m === 'start-failed'){
+        grunt.fail.warn('Failed'.red );
+        //grunt.fail.warn('Server Did not start')
+      }
+      taskDone();
+    });
+
+    serverProcess.send(options);
+  });
+
+  grunt.registerTask('dev:server-stop', 'Stop the dev server', function(){
+    var taskDone = this.async();
+    if(serverProcess){
+      grunt.log.write( 'Stopping dev server ...'.yellow );
+      serverProcess.once('exit', function(){
+        grunt.log.writeln( 'Done '.green );
         taskDone();
       });
+      serverProcess.kill();
     }
     else{
-      grunt.log.writeln( 'Dev server is already listening '.red );
+      grunt.log.writeln( 'Http Server is not running'.yellow );
       taskDone();
     }
-    if(!wsio){
-      wsio = new WebSocketServer({
-        httpServer: httpServer,
-        autoAcceptConnections: true
-      });
-      wsio.on('connect', function(request){
-        var connection = request; //.accept(); //.accept('*', request.origin);
-        console.log((new Date()) + ' Connection accepted.');
-        connection.on('message', function (message) {
-            if (message.type === 'utf8') {
-                console.log('Received Message: ' + message.utf8Data);
-                if (message.utf8Data === 'trigger') {
-                    grunt.helper('trigger', grunt.config('trigger.watchFile'));
-                    connection.sendUTF('Update triggered');
-                }
-                // LiveReload support
-                if (message.utf8Data.match(/^http:\/\//)) {
-                    connection.sendUTF("!!ver:1.6;");
-                }
-                if (message.utf8Data.match(/{.*/)) {
-                    var handshake = "{ command: 'hello', protocols: [ " +
-                        "'http://livereload.com/protocols/official-7', " +
-                        "'http://livereload.com/protocols/2.x-origin-version-negotiation', " +
-                        "'http://livereload.com/protocols/2.x-remote-control'" +
-                        "], serverName: 'grunt-reload', }";
-                    connection.sendUTF(handshake);
-                }
-            }
-        });
-        connection.on('close', function (reasonCode, description) {
-            console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
-        });
-      });
-    }
-
-    var injectionRoutes = options.client['inject-reload'] || ['.*\/index.html'];
-    var injector = grunt.helper('clientReload:injector', injectionRoutes);
-    var clientScript = grunt.helper('clientReload:script');
-    var connectApp = connect.createServer()
-      .use(injector)
-      .use(clientScript);
-    grunt.helper('webapps', connectApp);
-    grunt.helper('statics', connectApp);
-    httpServer.removeAllListeners('request');
-    httpServer.on('request', function(req, res){
-      connectApp(req, res);
-    });
-
-  });
-
-  grunt.registerTask('dev:client-reload', 'Reload connected clients', function(){
-    if(!wsio){
-      grunt.log.writeln('Websockets Server is not active');
-      return;
-    }
-    var path = grunt.file.watchFiles ? grunt.file.watchFiles.changed[0] : 'index.html';
-    var target = '';
-    // apply_js_live
-    var msg = '["refresh", {"path": "' + path + '", "target": "' + target + '"}]';
-
-    wsio.connections.forEach(function(connection){
-      console.log('Sending reload');
-      connection.sendUTF(msg);
-    });
-  });
-
-  // ==========================================================================
-  // HELPERS
-  // ==========================================================================
-  
-  /**
-   * A factory for script injection middleware
-   */
-  grunt.registerHelper('clientReload:injector', function(routes){
-    routes = routes || ['.*\/index.html'];
-    
-    var injector = function(req, res, next){
-      //return next();
-      var url = req.url;
-      var isMatch = false;
-      for(var i in routes){
-        var routeRe = new RegExp(routes[i]);
-        isMatch = routeRe.test(url);
-        if(isMatch) break;
-      }
-
-      if(!isMatch){
-        return next();
-      }
-
-      console.log('Injecting clientReload Script into', req.url);
-
-      var port = res.socket.server.address().port;
-
-      var _write = res.socket.write;
-      var _end = res.end;
-      var _writeHead = res.writeHead;
-      var _setHeader = res.setHeader;
-
-      var responseBuffer = new buffers();
-      var html = '';
-      var responseEncoding = 'utf8';
-      var headersBuffer;
-      var _statusCode;
-
-      res.socket.write = function(chunk, encoding){
-        var chunkBuffer = chunk;
-        if(chunkBuffer && typeof chunkBuffer === 'string'){
-          chunkBuffer = new Buffer(chunkBuffer, encoding);
-        }
-        responseBuffer.push(chunkBuffer);
-      };
-      
-      res.end = function(chunk, encoding){
-        if(chunk){
-          res.write(chunk, encoding);
-        }
-        originalResponse = responseBuffer.toString();
-        var response = originalResponse.replace(/<\/body>/, function(w) {
-          return [
-            "<!-- reload snippet -->\n",
-            "<script>\n",
-            "var markup = ",
-            "'<script src=\"http://' + (location.host || 'localhost').split(':')[0]",
-            " + ':" + port + "\\/reload-client.js\"><\\/script>'",
-            ";\n",
-            "document.write(markup)\n",
-            "</script>\n",
-            "\n",
-            w
-          ].join('');
-        });
-        response = response.replace(/Content-Length:\s*\d+/i, function(w){
-          //'Content-Length: '+ response.length
-          var length = parseInt(w.split(':')[1], 10);
-          length += response.length - originalResponse.length;
-          return 'Content-Length: ' + length;
-        });
-        
-        res.socket.write = _write;
-        res.socket.write(response);
-        _end.call(res);
-      };
-      return next();
-    };
-
-    return injector;
-  });
-
-  /**
-   * Factory for client script middleware
-   */
-  grunt.registerHelper('clientReload:script', function(){
-    return function(req, res, next){
-      var route = '/reload-client.js';
-      if(req.url.match(route)){
-        var filePath = __dirname + "/static/reload-client.js";
-        fs.createReadStream(filePath).pipe(res);
-      }
-      else{next();}
-    };
-  });
-
-  grunt.registerHelper('statics', function(connectApp){
-    var map = grunt.config.get('dev.server.statics');
-    Object.keys(map).forEach(function(k){
-      var pattern = map[k];
-      var dir = grunt.file.expandDirs(pattern)[0];
-      connectApp.use(k, connect['static'](dir));
-    });
-  });
-
-  grunt.registerHelper('webapps', function(connectApp){
-    var map = grunt.config.get('dev.server.webApps');
-    Object.keys(map).forEach(function(k){
-      var pattern = map[k];
-      var dir = grunt.file.expandDirs(pattern)[0];
-      dir = path.resolve(dir);
-      app = require(dir);
-      connectApp.use(k, app);
-    });
   });
 };

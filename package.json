@@ -37,6 +37,7 @@
   "dependencies": {
     "connect": "~2.7.1",
     "buffers": "~0.1.1",
-    "websocket": "~1.0.7"
+    "websocket": "~1.0.7",
+    "engine.io": "~0.3.10"
   }
 }
