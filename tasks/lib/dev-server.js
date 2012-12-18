@@ -12,7 +12,7 @@ function startDevServer(options){
   var connectApp = connect.createServer()
     .use(injector)
     .use(clientReloadScript);
-  
+
   loadStatics(options.statics, connectApp);
   loadWebapps(options.webApps, connectApp);
 
@@ -150,6 +150,7 @@ function makeInjector(routes){
 function loadStatics(map, connectApp){
   Object.keys(map).forEach(function(k){
     var dir = map[k];
+    dir = path.resolve(dir);
     connectApp.use(k, connect['static'](dir));
   });
 }
