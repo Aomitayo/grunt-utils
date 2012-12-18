@@ -12,9 +12,9 @@ function startDevServer(options){
   var connectApp = connect.createServer()
     .use(injector)
     .use(clientReloadScript);
-
-  loadWebapps(options.webApps, connectApp);
+  
   loadStatics(options.statics, connectApp);
+  loadWebapps(options.webApps, connectApp);
 
   var httpServer = http.createServer();
   httpServer.on('request', function(req, res){
