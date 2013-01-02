@@ -73,4 +73,28 @@ module.exports = function(grunt) {
       taskDone();
     }
   });
+
+  grunt.registerTask('dev:client-reload', 'Reload Connected Clients', function(){
+    var taskDone = this.async();
+    if(serverProcess){
+      grunt.log.writeln( 'Reloading Connected Clients ...'.yellow );
+      var listener = function(m){
+        if(m === 'clients-reloaded'){
+          serverProcess.removeListener('message', listener);
+          grunt.log.writeln( 'Finshed Reloading Clients'.green );
+          finishTask();
+        }
+      };
+      serverProcess.on('message', listener);
+      serverProcess.send('reload-clients');
+    }
+    else{
+      grunt.log.writeln( 'Http Server is not running'.yellow );
+      finishTask();
+    }
+    function finishTask(){
+      grunt.task.run('watch');
+      taskDone();
+    }
+  });
 };

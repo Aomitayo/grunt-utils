@@ -6,12 +6,15 @@ var http = require('http');
 var connect = require('connect');
 var engineio = require('engine.io');
 
+var wsio;
+
 function startDevServer(options){
   var injectionRoutes = options.clientReload || ['.*\/index.html'];
   var injector = makeInjector(injectionRoutes);
   var connectApp = connect.createServer()
     .use(injector)
-    .use(clientReloadScript);
+    .use(clientReloadScript)
+    .use('/engine.io.js', engineIOClient);
 
   loadStatics(options.statics, connectApp);
   loadWebapps(options.webApps, connectApp);
@@ -20,7 +23,7 @@ function startDevServer(options){
   httpServer.on('request', function(req, res){
     connectApp(req, res);
   });
-  var wsio = engineio.attach(httpServer, {
+  wsio = engineio.attach(httpServer, {
     //path:'/engine.io',
     resource: 'clientreload',
     transports:['websocket', 'polling', 'flashsocket']
@@ -76,6 +79,13 @@ function clientReloadScript(req, res, next){
   else{next();}
 }
 
+function engineIOClient(req, res, next){
+  var filePath = path.dirname(require.resolve('engine.io-client'));
+  filePath = path.join(filePath, '../dist', 'engine.io.js');
+  console.log(filePath);
+  fs.createReadStream(filePath).pipe(res);
+}
+
 function makeInjector(routes){
   routes = routes || ['.*\/index.html'];
   
@@ -118,6 +128,8 @@ function makeInjector(routes){
       originalResponse = responseBuffer.toString();
       var response = originalResponse.replace(/<\/body>/, function(w) {
         return [
+          "<!-- engineio script -->\n",
+          '<script src="/engine.io.js" type="text/javascript"></script>\n',
           "<!-- reload snippet -->\n",
           "<script>\n",
           "var markup = ",
@@ -174,5 +186,13 @@ function loadRealtimeapps(map, httpServer){
 }
 
 process.on('message', function(options){
-  startDevServer(options);
+  if(options == 'reload-clients'){
+    (Object.keys(wsio.clients) || []).forEach(function(clientId){
+      wsio.clients[clientId].send('Reload');
+    });
+    process.send('clients-reloaded');
+  }
+  else{
+    startDevServer(options);
+  }
 });

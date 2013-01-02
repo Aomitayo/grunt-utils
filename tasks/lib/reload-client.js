@@ -1,7 +1,4 @@
 /*
- * grunt-reload
- * https://github.com/webxl/grunt-reload
- *
  * Copyright (c) 2012 webxl
  * Licensed under the MIT license.
  */
@@ -30,7 +27,7 @@
         return {
             connect:function () {
                 //this.socket = new WebSocket(url);
-                this.socket = eio(url);
+                this.socket = new eio.Socket(url);
                 this.socket.onopen = function(){
                     console.log('Reload Client: opened');
                 }
