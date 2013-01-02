@@ -28,9 +28,7 @@
   "scripts": {
     "test": "grunt test"
   },
-  "devDependencies": {
-    "grunt": "~0.3.17"
-  },
+  "devDependencies": {},
   "keywords": [
     "gruntplugin"
   ],
@@ -38,6 +36,10 @@
     "connect": "~2.7.1",
     "buffers": "~0.1.1",
     "websocket": "~1.0.7",
-    "engine.io": "~0.3.10"
+    "engine.io": "~0.3.10",
+    "grunt": "~0.3.17",
+    "requirejs": "~2.1.2",
+    "clean-css": "~0.9.1",
+    "rimraf": "~2.1.1"
   }
 }

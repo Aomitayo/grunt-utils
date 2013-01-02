@@ -31,6 +31,9 @@ module.exports = function(grunt) {
     }
   });
 
+  //load npm tasks
+  //grunt.loadNpmTasks('node-build-scripts');
+  
   // Load local tasks.
   grunt.loadTasks('tasks');
 
